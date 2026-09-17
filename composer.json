@@ -1,6 +1,6 @@
 {
-    "name": "phpnexus/cwh",
-    "homepage": "https://github.com/phpnexus/cwh",
+    "name": "highspeedoffice/cwh",
+    "homepage": "https://github.com/highspeedoffice/cwh",
     "type": "library",
     "description": "AWS CloudWatch Handler for Monolog library",
     "keywords": [
@@ -30,7 +30,7 @@
     "require": {
         "php": ">=8.1",
         "monolog/monolog": "^3.0",
-        "psr/cache": "^3.0",
+        "psr/simple-cache": "^3.0",
         "aws/aws-sdk-php": "^3.2"
     },
     "require-dev": {

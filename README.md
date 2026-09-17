@@ -212,12 +212,13 @@ do {
 When this handler is configured with `$createGroup = true` or `$createStream = true`, it performs an initialization check with AWS CloudWatch every time the handler instance is created.
 This adds latency and risks rate limiting from AWS in high traffic environments.
 
-Thanks to @Ostico this handler now supports PSR-6 caching for the initialization, allowing the log group or stream initialization state to be cached, preventing the need for further initialization checks until the cache expires (default: 5 minutes).
+Thanks to @Ostico this handler now supports PSR-16 caching for the initialization, allowing the log group or stream initialization state to be cached, preventing the need for further initialization checks until the cache expires (default: 5 minutes).
 
 ```php
 <?php
 
 use Aws\CloudWatchLogs\CloudWatchLogsClient;
+use Illuminate\Support\Facades\Cache;
 use Monolog\Logger;
 use Monolog\Level;
 use Monolog\Formatter\JsonFormatter;
@@ -242,9 +243,6 @@ $groupName = 'php-logtest';
 // Log stream name, will be created if none
 $streamName = 'ec2-instance-1';
 
-// Create cache adapter (must implement Psr\Cache\CacheItemPoolInterface)
-$cacheAdapter = new MyCacheAdapter('test-namespace');
-
 // Set cache TTL of 1 hour (default: 5 minutes)
 $cacheTtl = 3600;
 
@@ -253,7 +251,7 @@ $handler = new CloudWatch(
     $client,
     $groupName,
     $streamName,
-    cacheItemPool: $cacheAdapter,
+    cacheItemPool: Cache::store(),
     cacheItemTtl: $cacheTtl,
 );
 
@@ -272,7 +270,7 @@ $log->warning('Bar');
 $log->error('Baz');
 ```
 
-The [symfony/cache](https://symfony.com/doc/current/cache.html) package is a highly recommended PSR-6 cache adapter.
+Laravel 12 and Laravel 13 cache repositories implement `Psr\SimpleCache\CacheInterface`, so `Cache::store()` can be passed directly to `cacheItemPool`. Other PSR-16-compatible cache implementations can be used in the same way.
 
 For more information about why caching the initialization state can be beneficial, please refer to the original PR [#6](https://github.com/phpnexus/cwh/pull/6).
 

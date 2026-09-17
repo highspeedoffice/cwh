@@ -13,7 +13,7 @@ use Monolog\Formatter\LineFormatter;
 use Monolog\Handler\AbstractProcessingHandler;
 use Monolog\Level;
 use Monolog\LogRecord;
-use Psr\Cache\CacheItemPoolInterface;
+use Psr\SimpleCache\CacheInterface;
 
 class CloudWatch extends AbstractProcessingHandler
 {
@@ -66,7 +66,7 @@ class CloudWatch extends AbstractProcessingHandler
 
     private int|null $earliestTimestamp = null;
 
-    private ?CacheItemPoolInterface $cacheItemPool = null;
+    private ?CacheInterface $cacheItemPool = null;
 
     private int $cacheItemTtl = 60 * 5;
 
@@ -97,9 +97,9 @@ class CloudWatch extends AbstractProcessingHandler
      * @param bool $createStream (Optional) Whether to create log stream if log stream does not exist in the log group.
      * @param int $rpsLimit (Optional) Number of requests per second before a 1-second sleep is triggered.
      *                      Set to 0 to disable.
-     * @param CacheItemPoolInterface|null $cacheItemPool (Optional) PSR-6 cache pool to use for the caching log group
-     *                      and stream creation.
-     * @param int $cacheItemTtl (Optional) TTL for cache items in seconds.
+     * @param CacheInterface|null $cacheItemPool (Optional) PSR-16 cache implementation to use for caching log group
+     *                      and stream initialization.
+     * @param int $cacheItemTtl (Optional) TTL for cached initialization state in seconds.
      *
      * @throws Exception
      */
@@ -115,7 +115,7 @@ class CloudWatch extends AbstractProcessingHandler
         bool $createGroup = true,
         bool $createStream = true,
         int $rpsLimit = 0,
-        ?CacheItemPoolInterface $cacheItemPool = null,
+        ?CacheInterface $cacheItemPool = null,
         int $cacheItemTtl = 60 * 5
     ) {
         // Assert batch size is not above 10,000
@@ -138,7 +138,7 @@ class CloudWatch extends AbstractProcessingHandler
         $this->rpsLimit = $rpsLimit;
 
         if (!$createGroup && !$createStream && $cacheItemPool) {
-            throw new InvalidArgumentException('Cache pool can not be used without creating log group or stream');
+            throw new InvalidArgumentException('Cache can not be used without creating log group or stream');
         }
 
         $this->cacheItemPool = $cacheItemPool;
@@ -152,7 +152,7 @@ class CloudWatch extends AbstractProcessingHandler
     }
 
     /**
-     * @throws \Psr\Cache\InvalidArgumentException
+     * @throws \Psr\SimpleCache\InvalidArgumentException
      */
     protected function write(LogRecord $record): void
     {
@@ -185,7 +185,7 @@ class CloudWatch extends AbstractProcessingHandler
     }
 
     /**
-     * @throws \Psr\Cache\InvalidArgumentException
+     * @throws \Psr\SimpleCache\InvalidArgumentException
      */
     private function flushBuffer(): void
     {
@@ -328,20 +328,17 @@ class CloudWatch extends AbstractProcessingHandler
     }
 
     /**
-     * @throws \Psr\Cache\InvalidArgumentException
+     * @throws \Psr\SimpleCache\InvalidArgumentException
      */
     private function initializeGroup(): void
     {
-        // Check if a PSR-6 cache pool is available
+        // Check if a PSR-16 cache is available
         if ($this->cacheItemPool !== null) {
             // Create a cache key based on the group name, use hash to avoid invalid characters
             $cacheKey = 'cwh-group-' . hash('crc32c', $this->group);
 
-            // Attempt to retrieve the cached state for the current log group
-            $cacheItem = $this->cacheItemPool->getItem($cacheKey);
-
             // If the group is already cached, skip further initialization
-            if ($cacheItem->isHit()) {
+            if ($this->cacheItemPool->get($cacheKey, false) === true) {
                 return;
             }
         }
@@ -379,34 +376,25 @@ class CloudWatch extends AbstractProcessingHandler
             }
         }
 
-        // Check if a cache pool is configured
-        if (isset($cacheItem)) {
+        // Mark the log group as initialized in the cache
+        if ($this->cacheItemPool !== null) {
             // Mark the log group as initialized/existing
-            $cacheItem->set(true);
-
-            // Set the expiration time for this cache entry
-            $cacheItem->expiresAfter($this->cacheItemTtl);
-
-            // Persist the item to the cache to avoid redundant initialization checks
-            $this->cacheItemPool->save($cacheItem);
+            $this->cacheItemPool->set($cacheKey, true, $this->cacheItemTtl);
         }
     }
 
     /**
-     * @throws \Psr\Cache\InvalidArgumentException
+     * @throws \Psr\SimpleCache\InvalidArgumentException
      */
     private function initializeStream(): void
     {
-        // Check if a PSR-6 cache pool is configured
+        // Check if a PSR-16 cache is configured
         if ($this->cacheItemPool !== null) {
             // Create a cache key based on the stream name, use hash to avoid invalid characters
             $cacheKey = 'cwh-stream-' . hash('crc32c', $this->stream);
 
-            // Attempt to retrieve the cached state for the current log stream
-            $cacheItem = $this->cacheItemPool->getItem($cacheKey);
-
             // If the stream is already known to exist in cache, skip initialization
-            if ($cacheItem->isHit()) {
+            if ($this->cacheItemPool->get($cacheKey, false) === true) {
                 return;
             }
         }
@@ -437,21 +425,15 @@ class CloudWatch extends AbstractProcessingHandler
                 );
         }
 
-        // If a cache pool is available, mark the log stream as initialized
-        if (isset($cacheItem)) {
+        // If a cache is available, mark the log stream as initialized
+        if ($this->cacheItemPool !== null) {
             // Set value to true to indicate the stream exists
-            $cacheItem->set(true);
-
-            // Set the expiration time based on configured TTL
-            $cacheItem->expiresAfter($this->cacheItemTtl);
-
-            // Persist the item to the cache pool
-            $this->cacheItemPool->save($cacheItem);
+            $this->cacheItemPool->set($cacheKey, true, $this->cacheItemTtl);
         }
     }
 
     /**
-     * @throws \Psr\Cache\InvalidArgumentException
+     * @throws \Psr\SimpleCache\InvalidArgumentException
      */
     private function initialize(): void
     {
@@ -471,7 +453,7 @@ class CloudWatch extends AbstractProcessingHandler
     }
 
     /**
-     * @throws \Psr\Cache\InvalidArgumentException
+     * @throws \Psr\SimpleCache\InvalidArgumentException
      */
     public function close(): void
     {
