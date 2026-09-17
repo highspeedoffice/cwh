@@ -14,8 +14,7 @@ use Monolog\LogRecord;
 use PhpNexus\Cwh\Handler\CloudWatch;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
-use Psr\Cache\CacheItemInterface;
-use Psr\Cache\CacheItemPoolInterface;
+use Psr\SimpleCache\CacheInterface;
 use ReflectionClass;
 use ReflectionException;
 
@@ -179,10 +178,10 @@ class CloudWatchTest extends TestCase
      */
     public function testInvalidCacheConfiguration(): void
     {
-        $cacheMock = $this->createMock(CacheItemPoolInterface::class);
+        $cacheMock = $this->createMock(CacheInterface::class);
 
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cache pool can not be used without creating log group or stream');
+        $this->expectExceptionMessage('Cache can not be used without creating log group or stream');
 
         new CloudWatch(
             $this->clientMock,
@@ -200,10 +199,7 @@ class CloudWatchTest extends TestCase
      */
     public function testInitializeWithCacheHits(): void
     {
-        $cacheItemMock = $this->createMock(CacheItemInterface::class);
-        $cacheItemMock->method('isHit')->willReturn(true);
-
-        $cachePoolMock = $this->createMock(CacheItemPoolInterface::class);
+        $cachePoolMock = $this->createMock(CacheInterface::class);
 
         $matcher = $this->exactly(2);
         $expected1 = 'cwh-group-' . hash('crc32c', $this->groupName);
@@ -211,14 +207,16 @@ class CloudWatchTest extends TestCase
 
         $cachePoolMock
             ->expects($matcher)
-            ->method('getItem')
+            ->method('get')
             ->willReturnCallback(
-                function (string $key) use ($cacheItemMock, $matcher, $expected1, $expected2) {
+                function (string $key, mixed $default) use ($matcher, $expected1, $expected2) {
                     match ($matcher->numberOfInvocations()) {
                         1 => $this->assertEquals($expected1, $key),
                         2 => $this->assertEquals($expected2, $key),
                     };
-                    return $cacheItemMock;
+                    $this->assertFalse($default);
+
+                    return true;
                 }
             );
 
@@ -244,14 +242,16 @@ class CloudWatchTest extends TestCase
      */
     public function testInitializeWithCacheMisses(): void
     {
-        $cacheItemMock = $this->createMock(CacheItemInterface::class);
-        $cacheItemMock->method('isHit')->willReturn(false);
-        $cacheItemMock->expects($this->exactly(2))->method('set')->with(true);
-        $cacheItemMock->expects($this->exactly(2))->method('expiresAfter')->with(300);
-
-        $cachePoolMock = $this->createMock(CacheItemPoolInterface::class);
-        $cachePoolMock->method('getItem')->willReturn($cacheItemMock);
-        $cachePoolMock->expects($this->exactly(2))->method('save')->with($cacheItemMock);
+        $cachePoolMock = $this->createMock(CacheInterface::class);
+        $cachePoolMock->expects($this->exactly(2))->method('get')->with(
+            $this->isType('string'),
+            false
+        )->willReturn(false);
+        $cachePoolMock->expects($this->exactly(2))->method('set')->with(
+            $this->isType('string'),
+            true,
+            300
+        )->willReturn(true);
 
         // Mock AWS responses for initialization
         $logGroupsResult = new Result(['logGroups' => [['logGroupName' => $this->groupName]]]);
@@ -456,7 +456,7 @@ class CloudWatchTest extends TestCase
     }
 
     /**
-     * @throws \Psr\Cache\InvalidArgumentException
+     * @throws \Psr\SimpleCache\InvalidArgumentException
      * @throws Exception
      */
     public function testSendsOnClose(): void
@@ -477,7 +477,7 @@ class CloudWatchTest extends TestCase
     }
 
     /**
-     * @throws \Psr\Cache\InvalidArgumentException
+     * @throws \Psr\SimpleCache\InvalidArgumentException
      * @throws Exception
      */
     public function testSendsBatches(): void
@@ -642,7 +642,7 @@ class CloudWatchTest extends TestCase
     }
 
     /**
-     * @throws \Psr\Cache\InvalidArgumentException
+     * @throws \Psr\SimpleCache\InvalidArgumentException
      * @throws Exception
      */
     public function testSortsEntriesChronologically(): void
@@ -683,7 +683,7 @@ class CloudWatchTest extends TestCase
     }
 
     /**
-     * @throws \Psr\Cache\InvalidArgumentException
+     * @throws \Psr\SimpleCache\InvalidArgumentException
      * @throws Exception
      */
     public function testSendsBatchesSpanning24HoursOrLess(): void
